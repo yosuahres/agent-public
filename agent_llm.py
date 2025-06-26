@@ -1,34 +1,72 @@
-import pandas as pd
-from transformers import pipeline
-CSV_FILE_PATH = "/Users/hares/Desktop/infor2025/robot/agentllm/data-csv/class.csv"
+import csv
+import google.generativeai as genai
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from textwrap import wrap
+import os
+from dotenv import load_dotenv
 
-def generate_report(csv_file_path):
-    try:
-        df = pd.read_csv(csv_file_path)
+env_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(env_path)
 
-        if df.empty:
-            return "No data found in the CSV file."
+api_key = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=api_key)
 
-        text_generator = pipeline("text-generation", model="gpt2")
+def read_csv_to_string(file_path: str) -> str:
+    lines = []
+    with open(file_path, mode='r') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            time = row['Time']
+            x = row['X']
+            y = row['Y']
+            name = row['Object Name']
+            status = row['Object Status']
+            lines.append(f"{time},{x},{y},{name},{status}")
+    return "\n".join(lines)
 
-        report = text_generator(f"Generate a report based on the following data: {df.to_string()}",
-                                max_length=500,
-                                num_return_sequences=1)[0]['generated_text']
+def save_text_to_pdf(text: str, filename: str):
+    c = canvas.Canvas(filename, pagesize=A4)
+    width, height = A4
+    x_margin = 50
+    y = height - 50
+    line_height = 16
 
-        return report
-    except FileNotFoundError:
-        return f"Error: CSV file not found at {csv_file_path}"
-    except Exception as e:
-        return f"An error occurred: {str(e)}"
+    for paragraph in text.split("\n\n"):
+        wrapped_lines = []
+        for line in paragraph.split("\n"):
+            wrapped_lines += wrap(line, width=90)
+        for line in wrapped_lines:
+            if y <= 50:
+                c.showPage()
+                y = height - 50
+            c.drawString(x_margin, y, line)
+            y -= line_height
+        y -= line_height
 
-def run_report_generation():
-    report = generate_report(CSV_FILE_PATH)
-    print(report)
+    c.save()
+
+def generate_description_from_csv(file_path: str):
+    input_data = read_csv_to_string(file_path)
+    prompt = f"""
+You will receive comma-separated object detection data in the format:
+time, x, y, object name, status
+
+Each line represents one object. Create an English sentence describing each detected object. If the status was N/A write that no additional information was found
+
+Input:
+{input_data}
+"""
+    model = genai.GenerativeModel("models/gemini-2.5-flash")
+    response = model.generate_content(prompt)
+    result = response.text
+    print(result)
+    save_text_to_pdf(result, "output.pdf")
+    print("\nPDF saved as 'output.pdf' in the current directory.")
+
 
 if __name__ == "__main__":
-    print("Agent LLM is running. It will generate a report whenever data is available.")
-    while True:
-        try:
-            run_report_generation()
-        except Exception as e:
-            print(f"An error occurred: {e}")
+    print("Available Gemini models:")
+    for m in genai.list_models():
+        print(m.name)
+    generate_description_from_csv("input.csv")
