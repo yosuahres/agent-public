@@ -3,3 +3,5 @@ swarm
 reportlab
 google-generativeai
 python-dotenv
+speechrecognition
+pyaudio
